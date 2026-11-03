@@ -43,6 +43,14 @@
   },
   "author": "koishi-fumo-code",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/koishi-fumo-code/dsh-fx-arena.git"
+  },
+  "homepage": "https://github.com/koishi-fumo-code/dsh-fx-arena#readme",
+  "bugs": {
+    "url": "https://github.com/koishi-fumo-code/dsh-fx-arena/issues"
+  },
   "scripts": {
     "test": "node scripts/selftest.mjs",
     "register": "node scripts/install.mjs",
