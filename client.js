@@ -275,6 +275,18 @@ window.__ModuleLoader__.load({
         step(g, (l) => this.setSay(l), this.sayRef, (v) => this.setRunning(v))
         this.emit()
       },
+      /** 手动停止后台：清掉 tick 定时器、冻结当前局面（不判输赢、不记录战绩）喵 */
+      stop() {
+        clearInterval(this.timer)
+        this.timer = null
+        this.running = false
+        if (this.g) {
+          this.g.running = false
+          if (!this.g.result) this.g.result = '⏸ 已手动停止后台运行（局面冻结，按「开始切磋」重开一局）'
+        }
+        this.say = '……行吧，本小姐先歇会儿喵。后台循环停了，省点电。'
+        this.emit()
+      },
       trade(dir, c) {
         const g = this.g
         if (!g || !g.running) return
@@ -374,9 +386,10 @@ window.__ModuleLoader__.load({
         h('div', { 'data-fxa-head': '' },
           h('div', null,
             h('div', { 'data-fxa-title': '' }, 'FX战士大肥鱼'),
-            h('div', { 'data-fxa-sub': '' }, '本地模拟行情 · 零联网 · 零真钱 · 对手是算法版鲸鲸')),
+            h('div', { 'data-fxa-sub': '' }, running ? '后台运行中 · 切到会话也不停 · 可随时手动停止' : '本地模拟行情 · 零联网 · 零真钱 · 对手是算法版鲸鲸')),
           h('div', { 'data-fxa-clock': '' },
             h('div', { 'data-fxa-timer': '' }, fmtClock(view.left)),
+            h('button', { 'data-fxa-btn': '', 'data-close': '', disabled: !running, onClick: () => ENGINE.stop() }, '停止后台'),
             h('button', { 'data-fxa-btn': '', 'data-go': '', onClick: start }, running ? '重开一局' : '开始切磋'))),
 
         // ── 赛制：模式 / 杠杆 / 时长 ──
@@ -468,7 +481,8 @@ window.__ModuleLoader__.load({
 
         view.result ? h('div', { 'data-fxa-result': '' }, view.result) : null,
         h('div', { 'data-fxa-note': '' },
-          '模拟盘，价格由本地随机游走生成，和真实外汇无关，也不涉及任何真实资金。鲸鲸会看同一条行情跟你对着做。'),
+          '模拟盘，价格由本地随机游走生成，和真实外汇无关，也不涉及任何真实资金。',
+          '运行中点「停止后台」会清掉行情循环、冻结局面（省 CPU）；再点「开始切磋」重开一局。'),
       )
     }
 

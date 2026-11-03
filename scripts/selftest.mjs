@@ -281,6 +281,16 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
   ok('切回来订阅 → 拿到进行中的对局（不是新开的局）', !!snap && !!snap.view && snap.running === true && snap.view.log.length > 0)
   ok('切回来看到的 tick 已经推进过（状态延续）', ENGINE.g.tick === 5, String(ENGINE.g.tick))
   un2()
+
+  // 手动停止后台：清定时器、冻结局面、不判胜负；之后再 tick 也不再推进
+  ENGINE.timer = setInterval(() => ENGINE.tick(), 100)
+  ENGINE.stop()
+  ok('停止后台：running=false 且 tick 定时器已清空', ENGINE.running === false && ENGINE.timer === null)
+  ok('停止后台：局面冻结并标注「已手动停止」', !!ENGINE.g && /已手动停止/.test(ENGINE.g.result), ENGINE.g && ENGINE.g.result)
+  const tickBefore = ENGINE.g.tick
+  ENGINE.tick()
+  ok('停止后 tick 不再推进（不再烧 CPU）', ENGINE.g.tick === tickBefore, `${tickBefore} -> ${ENGINE.g.tick}`)
+
   ENGINE.running = false; ENGINE.g = null
 }
 
