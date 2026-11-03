@@ -135,13 +135,24 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
     }
     step(g, setSay, sayAtRef, setRunning)
   }
-  if (g.running) { g.endAt = 0; step(g, setSay, sayAtRef, setRunning) } // 模拟时间到
+  if (g.running) {
+    // 计时赛：把 endAt 拨到过去 = 时间到；归来模式：没有时限，造一次负债出局
+    if (mode === 'goal') { g.you.pos = null; g.you.locked = 0; g.you.balance = -1 }
+    else g.endAt = 0
+    step(g, setSay, sayAtRef, setRunning)
+  }
   const eq = g.you.equity, weq = g.whale.equity
   const finite = Number.isFinite(g.px) && Number.isFinite(eq) && Number.isFinite(weq)
   ok(`${tag}：跑完一局无 NaN`, finite, `px=${g.px} you=${eq} whale=${weq}`)
   ok(`${tag}：价格没跑飞（量级还在 ±300%）`, g.px > pair.base * 0.2 && g.px < pair.base * 5, `px=${g.px}`)
   ok(`${tag}：正常收束（running=false 且有胜负）`, g.running === false && !!g.result, g.result)
-  ok(`${tag}：权益地板 0（模拟盘不倒欠）`, eq >= 0 && weq >= 0, `you=${eq} whale=${weq}`)
+  if (mode === 'goal') {
+    ok(`${tag}：负债（权益 < 0）才出局，出局文案带「负债」`, /负债/.test(g.result), g.result)
+    ok(`${tag}：归来模式初始资金 30 万`, g.cash === 300000, String(g.cash))
+    ok(`${tag}：归来模式不限时（left = ∞）`, g.left === Infinity, String(g.left))
+  } else {
+    ok(`${tag}：权益地板 0（模拟盘不倒欠）`, eq >= 0 && weq >= 0, `you=${eq} whale=${weq}`)
+  }
   const whaleTrades = g.log.filter((l) => !l.you).length
   ok(`${tag}：大肥鱼真的下场交易了`, whaleTrades > 0 || !!g.whale.pos, `鱼单 ${whaleTrades} 笔`)
   ok(`${tag}：结算后双方都空仓`, !g.you.pos && !g.whale.pos)
@@ -197,19 +208,22 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
 
   // freshState 接参数：时长进倒计时、杠杆进状态、模式存起来；不传参 = 老行为
   const g500 = freshState({ pi: 0, lev: 500, dur: 500, mode: 'goal' })
-  ok('500s 局时正确接线', g500.left === 500000 && g500.lev === 500 && g500.mode === 'goal')
+  ok('归来模式：初始 30 万、不限时、杠杆接线', g500.cash === 300000 && g500.left === Infinity && g500.lev === 500 && g500.mode === 'goal',
+    `cash=${g500.cash} left=${g500.left}`)
   const gdef = freshState()
-  ok('不传参数 = 默认计时赛 90s 100x', gdef.left === 90000 && gdef.lev === 100 && gdef.mode === 'timed')
+  ok('不传参数 = 默认计时赛 90s 100x / 1 万', gdef.left === 90000 && gdef.lev === 100 && gdef.mode === 'timed' && gdef.cash === 10000)
 
-  // 强平线：1 手欧美 100x（保证金 $1086），价格砸 9% → 权益 ~$160 < 1086×15%=163 → 爆
-  const gl = freshState({ pi: 0, lev: 100, dur: 500, mode: 'goal' })
-  gl.running = true; gl.endAt = Date.now() + 500000
-  gl.you.pos = { dir: 1, lot: 1, entry: 1.086, margin: marginFor(1, 1.086, 0, 100) }
+  // 负债判负（归来模式）：30 手欧美 100x，价格从 1.086 砸到 0.98 → 亏 31.8 万 > 30 万本金 → 负债
+  const gl = freshState({ pi: 0, lev: 100, dur: 90, mode: 'goal' })
+  gl.running = true
+  gl.you.pos = { dir: 1, lot: 30, entry: 1.086, margin: marginFor(30, 1.086, 0, 100) }
   gl.you.locked = gl.you.pos.margin
+  gl.px = 0.98
   const setSay = noop, sayAtRef = { current: 0 }, setRunning = noop
-  gl.px = 0.986 // -1000 pip：权益 = 10000 - 10000 = 0 → 权益≤0 也归爆
   step(gl, setSay, sayAtRef, setRunning)
-  ok('权益归零 → 强平判负', gl.running === false && /强平/.test(gl.result), gl.result)
+  ok('归来模式：负债（权益 < 0）判负', gl.running === false && gl.you.dead === true && /负债/.test(gl.result),
+    `eq=${gl.you.equity.toFixed(0)} ${gl.result}`)
+  ok('归来模式不再有 15% 强平线', gl.you.equity > -1e5, String(gl.you.equity))
 
   // 维持线（没归零也爆）：1 手欧美 100x 保证金 $1086，维持线 $163；
   // 价格砸到 0.9869 → 亏 9910 → 权益 ≈ $90（>0 但 <163）→ 维持线爆仓
@@ -232,13 +246,17 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
   step(gg, setSay, sayAtRef, setRunning)
   ok('权益先摸 2000 万 → 传说局判胜', gg.running === false && gg.you.equity >= GOAL && /传说局/.test(gg.result), gg.result)
 
-  // 久留美归来到时限：没人摸线 → 比谁离目标近（鱼 5 万 > 你 1 万 → 鱼近）
+  // 归来模式不限时：把 endAt 拨到过去、连跑 5000 拍也不会因为「时间到」收摊
   const gt = freshState({ pi: 0, lev: 10, dur: 90, mode: 'goal' })
   gt.running = true
-  gt.whale.balance = 50000
-  gt.endAt = 0
+  gt.endAt = 0 // 故意设成过去
+  gt.whale.balance = 120000
+  for (let t = 0; t < 3 && gt.running; t++) step(gt, setSay, sayAtRef, setRunning)
+  ok('归来模式：endAt 过期也不会自动收摊（不限时）', gt.running === true, `running=${gt.running} ${gt.result}`)
+  // 鱼负债 → 玩家赢
+  gt.whale.pos = null; gt.whale.locked = 0; gt.whale.balance = -5
   step(gt, setSay, sayAtRef, setRunning)
-  ok('久留美归来到时限：没摸线比进度', /时间上限/.test(gt.result) && /大肥鱼/.test(gt.result), gt.result)
+  ok('归来模式：对手负债 → 你赢', gt.running === false && /大肥鱼负债/.test(gt.result), gt.result)
 }
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`)

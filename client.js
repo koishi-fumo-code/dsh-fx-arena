@@ -26,9 +26,10 @@ window.__ModuleLoader__.load({
     const TICK_MS = 100              // 价格跳动间隔
     const TPC = 20                   // 每 20 个 tick 合成一根 K 线（= 2s）
     const CANDLES = 72               // 图上最多留多少根
-    const START_CASH = 10000         // 双方开局资金
+    const START_CASH = 10000         // 计时赛：双方开局资金
+    const GOAL_CASH = 300000         // 重生之久留美归来：初始 30 万（无时限，负债判负喵）
     const LEVS = [10, 20, 50, 100, 200, 500]   // 可选杠杆（默认 100）
-    const DURS = [90, 180, 360, 500]           // 可选局时（秒，默认 90）
+    const DURS = [90, 180, 360, 500]           // 可选局时（秒，默认 90；仅计时赛用）
     const GOAL = 20000000            // 重生之久留美归来：权益先到 2000 万喵
     const MAINT = 0.15               // 强平线：权益 < 占用保证金 × 15% 就爆
     const SPREAD = 1.0               // 点差（pip，双向成本）
@@ -227,12 +228,13 @@ window.__ModuleLoader__.load({
         const c = cfgRef.current
         const g = freshState(c)
         g.running = true
-        g.endAt = Date.now() + roundMs(c.dur)
+        // 重生之久留美归来：不限时；计时赛：到点收摊喵
+        g.endAt = c.mode === 'goal' ? Infinity : Date.now() + roundMs(c.dur)
         gameRef.current = g
         setRunning(true)
         pushView(g, setView)
         speak(pick(c.mode === 'goal'
-          ? ['「重生之久留美归来」？哼，本小姐上辈子就爆过你的仓，这辈子记得一清二楚喵。', '先赚到 2000 万？你不如先想想怎么不爆仓喵……重生剧本里反派都是这么想的。', '2000 万？哼，本小姐先到的话，你就给鲸元打工喵！']
+          ? ['「重生之久留美归来」？哼，本小姐上辈子就爆过你的仓，这辈子记得一清二楚喵。', '这次没有倒计时了喵——负债才算出局，你悠着点。', '30 万本金，2000 万目标，没时限。谁先负债谁先抬走喵。']
           : LINES.start), setSay, sayAtRef)
       }, [])
 
@@ -311,9 +313,10 @@ window.__ModuleLoader__.load({
       }
 
       // 重生之久留美归来进度：对数刻度（10K→20M 跨三个数量级，线性条会全程趴窝）
+      // 归来模式进度：对数刻度（30 万→2000 万）；负债时进度归零喵
       const goalPct = (eq) => {
-        const lo = Math.log10(START_CASH), hi = Math.log10(GOAL)
-        return Math.max(0, Math.min(100, (Math.log10(Math.max(START_CASH, eq)) - lo) / (hi - lo) * 100))
+        const lo = Math.log10(GOAL_CASH), hi = Math.log10(GOAL)
+        return Math.max(0, Math.min(100, (Math.log10(Math.max(GOAL_CASH, eq)) - lo) / (hi - lo) * 100))
       }
 
       return h('div', { 'data-fxa': '' },
@@ -340,13 +343,15 @@ window.__ModuleLoader__.load({
               onClick: () => setCfg((c) => ({ ...c, lev: L })),
             }, `${L}x`)),
             h('span', { 'data-fxa-tag': '' }, '时长'),
-            DURS.map((d) => h('button', {
-              key: d, 'data-fxa-chip': '', 'data-on': cfg.dur === d ? '' : undefined, disabled: busy,
-              onClick: () => setCfg((c) => ({ ...c, dur: d })),
-            }, `${d}s`))),
+            cfg.mode === 'goal'
+              ? h('span', { 'data-fxa-tag': '' }, '不限时')
+              : DURS.map((d) => h('button', {
+                key: d, 'data-fxa-chip': '', 'data-on': cfg.dur === d ? '' : undefined, disabled: busy,
+                onClick: () => setCfg((c) => ({ ...c, dur: d })),
+              }, `${d}s`))),
           cfg.mode === 'goal' ? h('div', { 'data-fxa-note': '' },
-            `重生之久留美归来：谁的权益先摸到 ${fmtShort(GOAL)}（2000 万）谁赢；被强平直接输。`,
-            `强平线 = 占用保证金的 ${MAINT * 100}%。${cfg.dur}s 是安全上限——到点还没人摸线，比谁离目标近。`) : null,
+            `重生之久留美归来：初始资金 ${fmtShort(GOAL_CASH)}（30 万），谁的权益先摸到 ${fmtShort(GOAL)}（2000 万）谁赢。`,
+            `不限时、没有强平线——只有负债（权益 < 0）才算出局。慢慢打，或者慢慢死喵。`) : null,
           cfg.mode === 'goal' && running ? h('div', { 'data-fxa-goals': '' },
             h('div', { 'data-fxa-goal': '' },
               h('span', null, '🐠'), h('div', { 'data-fxa-bar': '' },
@@ -432,19 +437,22 @@ window.__ModuleLoader__.load({
         for (let k = 0; k < TPC; k++) { px = drift(px, pair, r); hi = Math.max(hi, px); lo = Math.min(lo, px) }
         candles.push({ o, h: hi, l: lo, c: px })
       }
+      const cash = c.mode === 'goal' ? GOAL_CASH : START_CASH
       return {
-        pi: c.pi, lev: c.lev, mode: c.mode, dur: c.dur,
+        pi: c.pi, lev: c.lev, mode: c.mode, dur: c.dur, cash,
         r, px, candles, tick: 0, spikeDir: 1, spikeLeft: 0,
         last: px, lastActionAt: Date.now(), lastNudgeAt: 0,
-        you: freshAccount(), whale: freshAccount(),
+        you: freshAccount(cash), whale: freshAccount(cash),
         whaleNextThink: 12,
         // 每局一个脾气；但炒她自己的币（鲸元）时，本小姐永远做多喵
         whaleBias: (PAIRS[c.pi].id === 'WHALE') ? 1 : (r() > 0.45 ? 1 : -1),
-        running: false, endAt: 0, left: roundMs(c.dur), result: '',
+        running: false, endAt: 0,
+        left: c.mode === 'goal' ? Infinity : roundMs(c.dur), // 归来模式不限时
+        result: '',
         log: [{ t: Date.now(), dir: 1, txt: `—— 新的一局 · ${c.mode === 'goal' ? '重生之久留美归来 ' + fmtShort(GOAL) : '计时 ' + c.dur + 's'} · ${c.lev}x ——`, you: true }],
       }
     }
-    const freshAccount = () => ({ balance: START_CASH, locked: 0, pos: null, equity: START_CASH, peak: START_CASH, tauntAt: 0, dead: false })
+    const freshAccount = (cash = START_CASH) => ({ balance: cash, locked: 0, pos: null, equity: cash, peak: cash, tauntAt: 0, dead: false })
 
     /** GBM 一步（对数正态，波动率按品种） */
     function drift(px, pair, r) {
@@ -575,9 +583,19 @@ window.__ModuleLoader__.load({
       }
       // 终局判定
       if (g.mode === 'goal') {
-        if (g.you.equity >= GOAL || g.whale.equity >= GOAL) return finish(g, setSay, setRunning) // 先摸到 2000 万喵
+        // 重生之久留美归来：不限时。先摸到 2000 万 = 赢；负债（权益 < 0）= 输，没有强平线喵
+        if (g.you.equity >= GOAL || g.whale.equity >= GOAL) return finish(g, setSay, setRunning)
+        const youDebt = g.you.equity < 0
+        const whDebt = g.whale.equity < 0
+        if (youDebt || whDebt) {
+          g.you.dead = youDebt; g.whale.dead = whDebt
+          if (youDebt) g.log.unshift({ t: Date.now(), dir: -1, txt: '负债！你的权益跌破 0，出局喵', you: true })
+          if (whDebt) g.log.unshift({ t: Date.now(), dir: -1, txt: '负债！大肥鱼的权益跌破 0 了', you: false })
+          return finish(g, setSay, setRunning)
+        }
+        return // 没有时限，接着打喵
       }
-      // 强平线：权益跌破占用保证金的 15% 直接爆（两种模式通用，高杠杆的代价）
+      // 计时赛：爆仓 / 跌破维持线 / 到点收摊
       const youDead = liquidated(g.you) || g.you.equity <= 0
       const whDead = liquidated(g.whale) || g.whale.equity <= 0
       if (youDead || whDead) {
@@ -587,30 +605,28 @@ window.__ModuleLoader__.load({
         return finish(g, setSay, setRunning)
       }
       g.left = Math.max(0, g.endAt - Date.now())
-      if (g.left <= 0) finish(g, setSay, setRunning) // 计时模式比权益；重生之久留美归来比谁离 2000 万更近
+      if (g.left <= 0) finish(g, setSay, setRunning) // 计时赛到点：比权益
     }
 
     function finish(g, setSay, setRunning) {
       g.running = false
-      const preYou = g.you.equity, preWh = g.whale.equity // 判定看结算**前**的权益：goal 线 / 爆仓都是那一刻看的
-      // 结算双方持仓（模拟盘不许倒欠：地板 0）
+      const preYou = g.you.equity, preWh = g.whale.equity // 判定看结算**前**的权益
+      // 结算双方持仓。计时赛保本，模拟盘不倒欠；归来模式允许负债——负债就是出局条件喵
       for (const a of [g.you, g.whale]) {
         if (a.pos) { const { bid, ask } = quote(g, g.pi); a.balance += pnlOf(a.pos, a.pos.dir > 0 ? bid : ask, g.pi); a.pos = null }
-        a.equity = Math.max(0, a.balance)
+        a.equity = g.mode === 'goal' ? a.balance : Math.max(0, a.balance)
       }
       const you = g.you.equity, wh = g.whale.equity
       let result, line
       if (g.mode === 'goal') {
         const youReach = preYou >= GOAL, whReach = preWh >= GOAL
         const youDead = g.you.dead, whDead = g.whale.dead
-        if (youDead && whDead) { result = '💀💀 双爆，神仙打架同归于尽……算平局喵'; line = pick(LINES.draw) }
-        else if (youDead) { result = `💀 你被强平了。大肥鱼 ${fmtShort(wh)} 在旁边吃白饭看你爆仓`; line = pick(LINES.playerLose) }
-        else if (whDead) { result = `🏆 大肥鱼爆仓了！你 ${fmtShort(you)}，站着看她倒下`; line = pick(LINES.goalWin) }
+        if (youDead && whDead) { result = '💀💀 双双负债，神仙打架同归于尽……算平局喵'; line = pick(LINES.draw) }
+        else if (youDead) { result = `💀 负债出局：你欠了 ${fmtMoney(-you)}，大肥鱼 ${fmtShort(wh)} 在旁边吃白饭看你熄火喵`; line = pick(LINES.playerLose) }
+        else if (whDead) { result = `🏆 大肥鱼负债了！她欠 ${fmtMoney(-wh)}，你 ${fmtShort(you)} 稳稳站着`; line = pick(LINES.goalWin) }
         else if (youReach && !whReach) { result = `🏆🏆 传说局：你先摸到 ${fmtShort(GOAL)}！`; line = pick(LINES.goalWin) }
         else if (!youReach && whReach) { result = `🐠 大肥鱼先摸到 ${fmtShort(GOAL)}（你 ${fmtShort(you)}）……她飘了`; line = pick(LINES.goalLose) }
-        else if (you > wh) { result = `⏰ 时间上限。都没到 ${fmtShort(GOAL)}，你 ${fmtShort(you)} 离目标更近，判你赢`; line = pick(LINES.playerWin) }
-        else if (you < wh) { result = `⏰ 时间上限。都没到 ${fmtShort(GOAL)}，大肥鱼 ${fmtShort(wh)} 离目标更近`; line = pick(LINES.playerLose) }
-        else { result = `⏰ 时间上限，双方都是 ${fmtShort(you)}，平局`; line = pick(LINES.draw) }
+        else { result = `🏁 收摊：你 ${fmtShort(you)} vs 大肥鱼 ${fmtShort(wh)}`; line = pick(you >= wh ? LINES.playerWin : LINES.playerLose) }
       } else {
         const youDead = g.you.dead, whDead = g.whale.dead
         if (youDead && !whDead) { result = `💀 强平出局！爆仓就输，没什么好说的。大肥鱼 ${fmtMoney(wh)}`; line = pick(LINES.playerLose) }
@@ -639,6 +655,7 @@ window.__ModuleLoader__.load({
       })
     }
     const fmtClock = (ms) => {
+      if (!Number.isFinite(ms)) return '∞' // 重生之久留美归来：不限时喵
       const s = Math.ceil(ms / 1000)
       return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
     }
