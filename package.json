@@ -1,0 +1,51 @@
+{
+  "name": "dsh-fx-arena",
+  "version": "0.4.0",
+  "description": "DSH 插件：FX战士大肥鱼 —— 和大肥鱼（鲸鲸）切磋：可选杠杆 10~500x、时长 90~500s、计时赛/重生之久留美归来（冲 2000 万），入口在左侧图标条",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "fx",
+    "forex",
+    "game",
+    "simulator"
+  ],
+  "engines": {
+    "dsh": ">=0.1.7-rc.1",
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  },
+  "author": "koishi-fumo-code",
+  "license": "MIT",
+  "scripts": {
+    "test": "node scripts/selftest.mjs",
+    "register": "node scripts/install.mjs",
+    "unregister": "node scripts/uninstall.mjs"
+  }
+}
