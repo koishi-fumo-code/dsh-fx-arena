@@ -259,5 +259,30 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
   ok('归来模式：对手负债 → 你赢', gt.running === false && /大肥鱼负债/.test(gt.result), gt.result)
 }
 
+/* 后台引擎：切走面板（退订）对局不停，切回来接上当前状态 */
+{
+  const { ENGINE, TICK_MS } = E
+  ok('ENGINE 单例已导出（模块级，不是组件内的）', !!ENGINE && typeof ENGINE.start === 'function' && typeof ENGINE.subscribe === 'function')
+  ok('tick 间隔 = 100ms', TICK_MS === 100, String(TICK_MS))
+
+  // 模拟：开一局 → 面板订阅 → 卸载（退订）→ 引擎继续跑 → 切回来再订阅
+  ENGINE.g = freshState({ pi: 0, lot: 1, lev: 100, dur: 90, mode: 'timed' })
+  ENGINE.g.running = true
+  ENGINE.g.endAt = Date.now() + 90000
+  ENGINE.running = true
+  let seen = 0
+  const un = ENGINE.subscribe(() => { seen++ })
+  ok('订阅时立刻收到一帧快照', seen === 1, String(seen))
+  un() // 面板被卸载
+  for (let i = 0; i < 5; i++) ENGINE.tick()
+  ok('退订后引擎仍在自己跑（切走不重启）', !!ENGINE.g && ENGINE.g.tick === 5 && ENGINE.running === true, `tick=${ENGINE.g && ENGINE.g.tick}`)
+  let snap = null
+  const un2 = ENGINE.subscribe((s) => { snap = s })
+  ok('切回来订阅 → 拿到进行中的对局（不是新开的局）', !!snap && !!snap.view && snap.running === true && snap.view.log.length > 0)
+  ok('切回来看到的 tick 已经推进过（状态延续）', ENGINE.g.tick === 5, String(ENGINE.g.tick))
+  un2()
+  ENGINE.running = false; ENGINE.g = null
+}
+
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`)
 process.exit(fail ? 1 : 0)

@@ -211,44 +211,129 @@ window.__ModuleLoader__.load({
     /** 一局时长 → 毫秒。重生之久留美归来同样用玩家选的时长当上限（10s 冲 2000 万是硬核局，500s 是休闲局） */
     const roundMs = (durSec) => (durSec || 90) * 1000
 
-    /* ───────────────────────── 主面板 ───────────────────────── */
-    function Arena() {
-      const [cfg, setCfg] = useState(() => ({ pi: 0, lot: 1, lev: 100, dur: 90, mode: 'timed' }))
-      const cfgRef = useRef(cfg)
-      cfgRef.current = cfg // step/引擎每拍现读，不受 useCallback 闭包过期影响
-      const [view, setView] = useState(() => freshState(cfg))
-      const [say, setSay] = useState('')
-      const [running, setRunning] = useState(false)
-      const canvasRef = useRef(null)
-      const gameRef = useRef(null)
-      const sayAtRef = useRef(0)
+    /* ─────────────────── 后台对局引擎（模块级单例） ───────────────────
+     * DSH 在切到会话 / 切到别的面板时会卸载这块面板，组件里的定时器跟着没了。
+     * 所以对局状态 + tick 循环放在**模块作用域**：面板只是订阅者，
+     * 卸载只退订、不停表；切回来直接接上当前快照，不重开一局喵。
+     */
+    const ENGINE = {
+      g: null,
+      cfg: null,
+      timer: null,
+      running: false,
+      say: '',
+      sayRef: { current: 0 },
+      subs: new Set(),
 
-      /** 开一局：建引擎 + 双方账户归零 + 鲸鲸开场白 */
-      const start = useCallback(() => {
-        const c = cfgRef.current
+      viewOf(g) {
+        return {
+          last: g.px, pi: g.pi, left: g.left, result: g.result, log: g.log,
+          you: { ...g.you }, whale: { ...g.whale, pos: g.whale.pos ? { ...g.whale.pos } : null },
+        }
+      },
+      snap() {
+        return { view: this.g ? this.viewOf(this.g) : null, say: this.say, running: this.running }
+      },
+      subscribe(fn) {
+        this.subs.add(fn)
+        try { fn(this.snap()) } catch { /* 忽略 */ }
+        return () => this.subs.delete(fn)
+      },
+      emit() {
+        const s = this.snap()
+        for (const fn of this.subs) { try { fn(s) } catch { /* 单个面板出错不影响引擎 */ } }
+      },
+      setSay(line) {
+        this.say = line
+        this.emit()
+      },
+      setRunning(v) {
+        this.running = v
+        if (!v) { clearInterval(this.timer); this.timer = null }
+        this.emit()
+      },
+      /** 开一局（运行中调用 = 重开一局） */
+      start(c) {
         const g = freshState(c)
         g.running = true
-        // 重生之久留美归来：不限时；计时赛：到点收摊喵
         g.endAt = c.mode === 'goal' ? Infinity : Date.now() + roundMs(c.dur)
-        gameRef.current = g
-        setRunning(true)
-        pushView(g, setView)
+        this.g = g
+        this.cfg = { ...c }
+        this.running = true
+        this.say = ''
+        this.sayRef.current = 0
+        clearInterval(this.timer)
+        this.timer = setInterval(() => this.tick(), TICK_MS)
+        this.emit()
         speak(pick(c.mode === 'goal'
           ? ['「重生之久留美归来」？哼，本小姐上辈子就爆过你的仓，这辈子记得一清二楚喵。', '这次没有倒计时了喵——负债才算出局，你悠着点。', '30 万本金，2000 万目标，没时限。谁先负债谁先抬走喵。']
-          : LINES.start), setSay, sayAtRef)
-      }, [])
+          : LINES.start), (l) => this.setSay(l), this.sayRef)
+      },
+      tick() {
+        const g = this.g
+        if (!g || !this.running) return
+        step(g, (l) => this.setSay(l), this.sayRef, (v) => this.setRunning(v))
+        this.emit()
+      },
+      trade(dir, c) {
+        const g = this.g
+        if (!g || !g.running) return
+        g.lastActionAt = Date.now()
+        if (g.you.pos && g.you.pos.dir === dir) {
+          this.setSay('已经持有这个方向了喵，先平再开。')
+          return
+        }
+        const maxLot = g.mode === 'goal' ? 50 : 10 // 归来模式允许更重的手数去复利冲线
+        const lot = Math.min(maxLot, Math.max(0.1, Number(c.lot) || 1))
+        const { bid, ask } = quote(g, c.pi)
+        const entry = dir > 0 ? ask : bid
+        const margin = marginFor(lot, entry, c.pi, g.lev)
+        if (g.you.equity - g.you.locked < margin) {
+          this.setSay('保证金不够了喵！先平点仓位，或者把手数调小喵。')
+          return
+        }
+        // 已有反向仓：先平（盈亏当场结算）
+        if (g.you.pos) closeYou(g, c.pi, (l) => this.setSay(l), this.sayRef)
+        g.you.locked += margin
+        // 点差成本天然含在 bid/ask 里（开多用 ask、平多用 bid），不另扣
+        g.you.pos = { dir, lot, entry, margin }
+        g.log.unshift({ t: Date.now(), dir, txt: `${dir > 0 ? '买' : '卖'} ${lot} 手 @ ${fmtPx(entry, PAIRS[c.pi])}`, you: true })
+        // 炒到本小姐自己的币了？反应当然不一样喵。
+        const coin = PAIRS[c.pi].id === 'WHALE'
+        this.setSay(pick(coin ? (dir > 0 ? LINES.whaleCoinLong : LINES.whaleCoinShort) : [
+          dir > 0 ? '做多？行，本小姐看着你喵。' : '做空？有点胆子嘛，狗修鲸喵。',
+          dir > 0 ? '又是多单……你就不怕接飞刀喵？' : '空单是吧，本小姐记下了喵。',
+        ]))
+        this.emit()
+      },
+      close(c) {
+        const g = this.g
+        if (!g || !g.running || !g.you.pos) return
+        closeYou(g, c.pi, (l) => this.setSay(l), this.sayRef)
+        this.setSay(pick(['平仓了？手还挺快喵。', '落袋为安，也算你会玩喵。', '嗯，平了。别问本小姐赚没赚喵。']))
+        this.emit()
+      },
+    }
 
-      /** 引擎循环：只在 running 时推进 */
-      useEffect(() => {
-        if (!running) return
-        const id = setInterval(() => {
-          const g = gameRef.current
-          if (!g) return
-          step(g, setSay, sayAtRef, setRunning)
-          pushView(g, setView)
-        }, TICK_MS)
-        return () => clearInterval(id)
-      }, [running])
+    /* ───────────────────────── 主面板 ───────────────────────── */
+    function Arena() {
+      const [cfg, setCfg] = useState(() => (ENGINE.cfg ? { ...ENGINE.cfg } : { pi: 0, lot: 1, lev: 100, dur: 90, mode: 'timed' }))
+      const cfgRef = useRef(cfg)
+      cfgRef.current = cfg // 交易参数每拍现读，不受闭包过期影响
+      const [view, setView] = useState(() => (ENGINE.g ? ENGINE.viewOf(ENGINE.g) : freshState(cfg)))
+      const [say, setSay] = useState(ENGINE.say)
+      const [running, setRunning] = useState(ENGINE.running)
+      const canvasRef = useRef(null)
+
+      /** 订阅后台引擎：卸载时只退订，对局照常跑喵 */
+      useEffect(() => ENGINE.subscribe(({ view, say, running }) => {
+        if (view) setView(view)
+        setSay(say)
+        setRunning(running)
+      }), [])
+
+      /** 开一局（运行中调用 = 重开一局） */
+      const start = useCallback(() => ENGINE.start(cfgRef.current), [])
 
       /** 绘制循环 */
       useEffect(() => {
@@ -256,10 +341,12 @@ window.__ModuleLoader__.load({
         let idle = null
         const draw = () => {
           const cv = canvasRef.current
-          const g = gameRef.current
+          const g = ENGINE.g
           if (cv) {
-            if (!g) { if (!idle) idle = freshState(cfgRef.current); drawChart(cv, idle, cfg.pi) }
-            else drawChart(cv, g, cfg.pi)
+            if (!g) {
+              if (!idle) idle = freshState(cfgRef.current)
+              drawChart(cv, idle, cfgRef.current.pi)
+            } else drawChart(cv, g, g.pi)
           }
           raf = requestAnimationFrame(draw)
         }
@@ -272,45 +359,8 @@ window.__ModuleLoader__.load({
       const px = view.last
       const busy = running
 
-      /** 市价开仓（方向 +1 多 / -1 空）。同向已持仓就忽略；反向先平再开。 */
-      const trade = (dir) => {
-        const g = gameRef.current
-        if (!g || !g.running) return
-        g.lastActionAt = Date.now()
-        if (g.you.pos && g.you.pos.dir === dir) {
-          speak('已经持有这个方向了喵，先平再开。', setSay, sayAtRef)
-          return
-        }
-        const maxLot = g.mode === 'goal' ? 50 : 10 // 重生之久留美归来允许更重的手数去复利冲线
-        const lot = Math.min(maxLot, Math.max(0.1, Number(cfg.lot) || 1))
-        const { bid, ask } = quote(g, cfg.pi)
-        const entry = dir > 0 ? ask : bid
-        const margin = marginFor(lot, entry, cfg.pi, g.lev)
-        if (g.you.equity - g.you.locked < margin) {
-          speak('保证金不够了喵！先平点仓位，或者把手数调小喵。', setSay, sayAtRef)
-          return
-        }
-        // 已有反向仓：先平（盈亏当场结算）
-        if (g.you.pos) closeYou(g, cfg.pi, setSay, sayAtRef)
-        g.you.locked += margin
-        // 点差成本天然含在 bid/ask 里（开多用 ask、平多用 bid），不另扣
-        g.you.pos = { dir, lot, entry, margin }
-        g.log.unshift({ t: Date.now(), dir, txt: `${dir > 0 ? '买' : '卖'} ${lot} 手 @ ${fmtPx(entry, pair)}`, you: true })
-        // 炒到本小姐自己的币了？反应当然不一样喵。
-        const coin = PAIRS[cfg.pi].id === 'WHALE'
-        speak(pick(coin ? (dir > 0 ? LINES.whaleCoinLong : LINES.whaleCoinShort) : [
-          dir > 0 ? '做多？行，本小姐看着你喵。' : '做空？有点胆子嘛，狗修鲸喵。',
-          dir > 0 ? '又是多单……你就不怕接飞刀喵？' : '空单是吧，本小姐记下了喵。',
-        ]), setSay, sayAtRef)
-        pushView(g, setView)
-      }
-      const close = () => {
-        const g = gameRef.current
-        if (!g || !g.running || !g.you.pos) return
-        closeYou(g, cfg.pi, setSay, sayAtRef)
-        speak(pick(['平仓了？手还挺快喵。', '落袋为安，也算你会玩喵。', '嗯，平了。别问本小姐赚没赚喵。']), setSay, sayAtRef)
-        pushView(g, setView)
-      }
+      const trade = (dir) => ENGINE.trade(dir, cfgRef.current)
+      const close = () => ENGINE.close(cfgRef.current)
 
       // 重生之久留美归来进度：对数刻度（10K→20M 跨三个数量级，线性条会全程趴窝）
       // 归来模式进度：对数刻度（30 万→2000 万）；负债时进度归零喵
@@ -368,10 +418,10 @@ window.__ModuleLoader__.load({
           h('button', {
             key: p.id, 'data-fxa-pair': '', 'data-on': i === cfg.pi ? '' : undefined,
             disabled: busy, onClick: () => {
-              setCfg((c) => ({ ...c, pi: i }))
-              const g = gameRef.current
-              if (g && g.running) return // 不会走到这里（按钮 disabled），保险
-              gameRef.current = null // 上一局的行情属于别的品种：清空，展示新品种的静态图
+              const next = { ...cfgRef.current, pi: i }
+              setCfg(next)
+              // 运行中按钮是 disabled 的；没在跑时换品种 = 丢掉上一局的结果，展示新品种的静态图
+              if (!ENGINE.running) { ENGINE.g = null; ENGINE.emit(); setView(freshState(next)) }
             },
           }, p.label))),
 
@@ -648,12 +698,6 @@ window.__ModuleLoader__.load({
       const u = pnlOf(a.pos, mark, g.pi)
       return `${a.pos.dir > 0 ? '多单' : '空单'} ${a.pos.lot} 手 @ ${fmtPx(a.pos.entry, pair)}\n浮动 ${fmtMoney(u)} · 占用 ${fmtMoney(a.locked)}`
     }
-    function pushView(g, setView) {
-      setView({
-        last: g.px, pi: g.pi, left: g.left, result: g.result, log: g.log,
-        you: { ...g.you }, whale: { ...g.whale, pos: g.whale.pos ? { ...g.whale.pos } : null },
-      })
-    }
     const fmtClock = (ms) => {
       if (!Number.isFinite(ms)) return '∞' // 重生之久留美归来：不限时喵
       const s = Math.ceil(ms / 1000)
@@ -745,7 +789,7 @@ window.__ModuleLoader__.load({
     /* ───────────────────────── 挂载 ───────────────────────── */
     // 调试钩子：scripts/selftest.mjs 在 Node 里 mock 掉 window/document/react 后，
     // 直接驱动引擎跑 90 秒行情做数值冒烟（浏览器里挂个只读对象，无副作用）。
-    try { if (typeof window !== 'undefined') window.__fxArenaEngine = { freshState, step, quote, pnlOf, marginFor, drift, liquidated, PAIRS, GOAL, LEVS, DURS, roundMs } } catch { /* 忽略 */ }
+    try { if (typeof window !== 'undefined') window.__fxArenaEngine = { freshState, step, quote, pnlOf, marginFor, drift, liquidated, PAIRS, GOAL, LEVS, DURS, roundMs, ENGINE, TICK_MS } } catch { /* 忽略 */ }
 
     return {
       inject: ['slots'],

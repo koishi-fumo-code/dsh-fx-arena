@@ -1,6 +1,6 @@
 {
   "name": "dsh-fx-arena",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "DSH 插件：FX战士大肥鱼 —— 和大肥鱼（鲸鲸）切磋：可选杠杆 10~500x、计时赛 90~500s，或「重生之久留美归来」：30 万本金、不限时、先摸到 2000 万赢、负债即出局；入口在左侧图标条",
   "type": "module",
   "main": "index.js",
