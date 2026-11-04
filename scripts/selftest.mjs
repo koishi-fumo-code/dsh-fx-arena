@@ -224,6 +224,27 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
   ok('归来模式：负债（权益 < 0）判负', gl.running === false && gl.you.dead === true && /负债/.test(gl.result),
     `eq=${gl.you.equity.toFixed(0)} ${gl.result}`)
   ok('归来模式不再有 15% 强平线', gl.you.equity > -1e5, String(gl.you.equity))
+  ok('空中飞人：你负债出局 → 次数 +1 且写进结果', /空中飞人第 \d+ 次/.test(gl.result), gl.result)
+
+  // 空中飞人计数规则：鱼负债不飞、双负债不飞、计时赛负债也不飞
+  const { ENGINE } = E
+  const flyBefore = ENGINE.flyer
+  const g1 = freshState({ pi: 0, lev: 10, dur: 90, mode: 'goal' })
+  g1.running = true; g1.whale.balance = -5
+  step(g1, setSay, sayAtRef, setRunning)
+  ok('空中飞人：鱼负债（你赢）不计数', ENGINE.flyer === flyBefore && !/空中飞人/.test(g1.result), g1.result)
+  const g2 = freshState({ pi: 0, lev: 10, dur: 90, mode: 'goal' })
+  g2.running = true; g2.you.balance = -5; g2.whale.balance = -5
+  step(g2, setSay, sayAtRef, setRunning)
+  ok('空中飞人：双负债算平局不计数', ENGINE.flyer === flyBefore && !/空中飞人/.test(g2.result), g2.result)
+  const g3 = freshState({ pi: 0, lev: 10, dur: 90, mode: 'timed' })
+  g3.running = true; g3.you.balance = -5
+  step(g3, setSay, sayAtRef, setRunning)
+  ok('空中飞人：计时赛爆仓不计数（只属于归来模式）', ENGINE.flyer === flyBefore && !/空中飞人/.test(g3.result), g3.result)
+  const g4 = freshState({ pi: 0, lev: 10, dur: 90, mode: 'goal' })
+  g4.running = true; g4.you.balance = -1
+  step(g4, setSay, sayAtRef, setRunning)
+  ok('空中飞人：归来模式你负债 → 恰好 +1', ENGINE.flyer === flyBefore + 1, `${flyBefore} -> ${ENGINE.flyer}`)
 
   // 维持线（没归零也爆）：1 手欧美 100x 保证金 $1086，维持线 $163；
   // 价格砸到 0.9869 → 亏 9910 → 权益 ≈ $90（>0 但 <163）→ 维持线爆仓

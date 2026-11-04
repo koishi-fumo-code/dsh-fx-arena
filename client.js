@@ -169,6 +169,8 @@ window.__ModuleLoader__.load({
 [data-fxa-fill][data-you]{background:var(--fxa-you);}
 [data-fxa-goalnum]{min-width:72px;text-align:right;font-weight:700;}
 [data-fxa-goaltarget]{font-size:11px;color:var(--dsw-alias-label-tertiary,#9aa0a6);}
+[data-fxa-flyer]{font-size:14px;font-weight:800;padding:1px 10px;border-radius:999px;
+  background:rgba(56,189,248,.16);color:var(--fxa-whale);}
 [data-fxa-pair]{height:30px;padding:0 12px;border-radius:8px;font-size:12px;cursor:pointer;
   border:1px solid var(--dsw-alias-border-default,rgba(127,127,127,.35));
   background:transparent;color:inherit;}
@@ -211,6 +213,21 @@ window.__ModuleLoader__.load({
     /** 一局时长 → 毫秒。重生之久留美归来同样用玩家选的时长当上限（10s 冲 2000 万是硬核局，500s 是休闲局） */
     const roundMs = (durSec) => (durSec || 90) * 1000
 
+    /** 空中飞人次数：归来模式每负债出局一次 +1，跨局持久（localStorage 不可用时退内存） */
+    const FLYER_KEY = 'fx-arena-flyer'
+    let flyerMem = 0
+    function readFlyer() {
+      try {
+        const n = Number(localStorage.getItem(FLYER_KEY))
+        return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
+      } catch { return flyerMem }
+    }
+    function writeFlyer(n) {
+      flyerMem = n
+      try { localStorage.setItem(FLYER_KEY, String(n)) } catch { /* 忽略 */ }
+      return n
+    }
+
     /* ─────────────────── 后台对局引擎（模块级单例） ───────────────────
      * DSH 在切到会话 / 切到别的面板时会卸载这块面板，组件里的定时器跟着没了。
      * 所以对局状态 + tick 循环放在**模块作用域**：面板只是订阅者，
@@ -224,6 +241,8 @@ window.__ModuleLoader__.load({
       say: '',
       sayRef: { current: 0 },
       subs: new Set(),
+      /** 空中飞人次数：归来模式里每输一局 +1（跨局持久，存在 localStorage） */
+      flyer: readFlyer(),
 
       viewOf(g) {
         return {
@@ -232,7 +251,7 @@ window.__ModuleLoader__.load({
         }
       },
       snap() {
-        return { view: this.g ? this.viewOf(this.g) : null, say: this.say, running: this.running }
+        return { view: this.g ? this.viewOf(this.g) : null, say: this.say, running: this.running, flyer: this.flyer }
       },
       subscribe(fn) {
         this.subs.add(fn)
@@ -335,13 +354,15 @@ window.__ModuleLoader__.load({
       const [view, setView] = useState(() => (ENGINE.g ? ENGINE.viewOf(ENGINE.g) : freshState(cfg)))
       const [say, setSay] = useState(ENGINE.say)
       const [running, setRunning] = useState(ENGINE.running)
+      const [flyer, setFlyer] = useState(ENGINE.flyer)
       const canvasRef = useRef(null)
 
       /** 订阅后台引擎：卸载时只退订，对局照常跑喵 */
-      useEffect(() => ENGINE.subscribe(({ view, say, running }) => {
+      useEffect(() => ENGINE.subscribe(({ view, say, running, flyer }) => {
         if (view) setView(view)
         setSay(say)
         setRunning(running)
+        if (typeof flyer === 'number') setFlyer(flyer)
       }), [])
 
       /** 开一局（运行中调用 = 重开一局） */
@@ -415,6 +436,10 @@ window.__ModuleLoader__.load({
           cfg.mode === 'goal' ? h('div', { 'data-fxa-note': '' },
             `重生之久留美归来：初始资金 ${fmtShort(GOAL_CASH)}（30 万），谁的权益先摸到 ${fmtShort(GOAL)}（2000 万）谁赢。`,
             `不限时、没有强平线——只有负债（权益 < 0）才算出局。慢慢打，或者慢慢死喵。`) : null,
+          cfg.mode === 'goal' ? h('div', { 'data-fxa-row': '' },
+            h('span', { 'data-fxa-tag': '' }, '空中飞人'),
+            h('span', { 'data-fxa-flyer': '' }, `${flyer} 次`),
+            h('span', { 'data-fxa-note': '' }, '归来模式里每负债出局一次，就 +1 喵')) : null,
           cfg.mode === 'goal' && running ? h('div', { 'data-fxa-goals': '' },
             h('div', { 'data-fxa-goal': '' },
               h('span', null, '🐠'), h('div', { 'data-fxa-bar': '' },
@@ -688,7 +713,7 @@ window.__ModuleLoader__.load({
         if (youDead && whDead) { result = '💀💀 双双负债，神仙打架同归于尽……算平局喵'; line = pick(LINES.draw) }
         else if (youDead) { result = `💀 负债出局：你欠了 ${fmtMoney(-you)}，大肥鱼 ${fmtShort(wh)} 在旁边吃白饭看你熄火喵`; line = pick(LINES.playerLose) }
         else if (whDead) { result = `🏆 大肥鱼负债了！她欠 ${fmtMoney(-wh)}，你 ${fmtShort(you)} 稳稳站着`; line = pick(LINES.goalWin) }
-        else if (youReach && !whReach) { result = `🏆🏆 传说局：你先摸到 ${fmtShort(GOAL)}！`; line = pick(LINES.goalWin) }
+        else if (youReach && !whReach) { result = `🏆 传说局：你先摸到 ${fmtShort(GOAL)}！`; line = pick(LINES.goalWin) }
         else if (!youReach && whReach) { result = `🐠 大肥鱼先摸到 ${fmtShort(GOAL)}（你 ${fmtShort(you)}）……她飘了`; line = pick(LINES.goalLose) }
         else { result = `🏁 收摊：你 ${fmtShort(you)} vs 大肥鱼 ${fmtShort(wh)}`; line = pick(you >= wh ? LINES.playerWin : LINES.playerLose) }
       } else {
@@ -701,6 +726,11 @@ window.__ModuleLoader__.load({
         else { result = `平局，双方都 ${fmtMoney(you)}`; line = pick(LINES.draw) }
       }
       g.result = result
+      // 空中飞人 +1：归来模式里**你负债出局**才算飞一次（双负债是平局，不飞喵）
+      if (g.mode === 'goal' && g.you.dead && !g.whale.dead) {
+        ENGINE.flyer = writeFlyer(ENGINE.flyer + 1)
+        g.result = `${result} —— 空中飞人第 ${ENGINE.flyer} 次`
+      }
       record(g.mode === 'goal' && preYou >= GOAL ? 'goal' : you > wh ? 'win' : you < wh ? 'lose' : 'draw', you - wh)
       setSay(line); setRunning(false)
     }
