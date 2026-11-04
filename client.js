@@ -33,17 +33,20 @@ window.__ModuleLoader__.load({
     const GOAL = 20000000            // 重生之久留美归来：权益先到 2000 万喵
     const MAINT = 0.15               // 强平线：权益 < 占用保证金 × 15% 就爆
     const SPREAD = 1.0               // 点差（pip，双向成本）
-    const TOKEN_USD = 0.0001         // 游戏内汇率：1 token = $0.0001（$100/百万 token），鲸元/TOKEN 折美元记账就按这个喵
+    const TOKEN_USD = 0.0001         // 游戏内汇率：1 token = $0.0001（$100/百万 token），所有 TOKEN 对折美元记账都按这个喵
     const PAIRS = [
-      { id: 'EURUSD', label: 'EUR/USD', base: 1.0860, vol: 0.00007, dp: 5, pip: 0.0001,
-        units: 100000, baseUsd: (p) => p, quoteUsd: () => 1 },
-      { id: 'GBPUSD', label: 'GBP/USD', base: 1.2710, vol: 0.00008, dp: 5, pip: 0.0001,
-        units: 100000, baseUsd: (p) => p, quoteUsd: () => 1 },
-      { id: 'USDJPY', label: 'USD/JPY', base: 151.40, vol: 0.010, dp: 3, pip: 0.01,
-        units: 100000, baseUsd: () => 1, quoteUsd: (p) => 1 / p },
+      // 1 EUR = 10860 token（= $1.086）。1 手 = 10 万枚；1 pip = 1 token。
+      { id: 'EURTKN', label: 'EUR/TOKEN', base: 10860, vol: 0.7, dp: 0, pip: 1, sfx: ' t',
+        units: 100000, baseUsd: (p) => p * TOKEN_USD, quoteUsd: () => TOKEN_USD },
+      // 1 GBP = 12710 token（= $1.271）。
+      { id: 'GBPTKN', label: 'GBP/TOKEN', base: 12710, vol: 0.8, dp: 0, pip: 1, sfx: ' t',
+        units: 100000, baseUsd: (p) => p * TOKEN_USD, quoteUsd: () => TOKEN_USD },
+      // 1 token = 0.015140 JPY。1 手 = 10 亿 token；1 pip = 0.000001 JPY。
+      { id: 'TKNJPY', label: 'TOKEN/JPY', base: 0.015140, vol: 0.000001, dp: 6, pip: 0.000001,
+        units: 1000000000, baseUsd: () => TOKEN_USD, quoteUsd: (p) => TOKEN_USD / p },
       { id: 'XAUUSD', label: '黄金', base: 2320.0, vol: 0.28, dp: 2, pip: 0.1,
         units: 100, baseUsd: (p) => p, quoteUsd: () => 1 },
-      // 鲸元/TOKEN：鲸鲸的币兑「token」的行情（1 token = $0.0001 折算记账）。
+      // 鲸元/TOKEN：鲸鲸的币兑「token」的行情。
       // 1 鲸元 ≈ 4200 token；波动是外汇的十几倍。炒她自己的币，她会当场跳脚喵。
       { id: 'WHALE', label: '鲸元/TOKEN', base: 4200, vol: 5, dp: 1, pip: 1, sfx: ' t',
         units: 50000, baseUsd: (p) => p * TOKEN_USD, quoteUsd: () => TOKEN_USD },

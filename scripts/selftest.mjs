@@ -158,19 +158,21 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
   ok(`${tag}：结算后双方都空仓`, !g.you.pos && !g.whale.pos)
 }
 
-/* 数值抽查：量级对不对（1 手欧美 = 10 万股，保证金 1%，100 pip ≈ $1000） */
+/* 数值抽查：量级对不对（TOKEN 对按 1 token=$0.0001 折美元，和旧 USD 对同量级） */
 {
-  const one = PAIRS[0]
+  const one = PAIRS[0] // EUR/TOKEN：1 EUR = 10860 t，1 手 = 10 万枚，1 pip = 1 t
+  ok('品种表：前三个是 TOKEN 对', PAIRS[0].id === 'EURTKN' && PAIRS[1].id === 'GBPTKN' && PAIRS[2].id === 'TKNJPY')
   const m = marginFor(1, one.base, 0)
-  const p = pnlOf({ dir: 1, lot: 1, entry: one.base }, one.base + 0.0100, 0)
+  const p = pnlOf({ dir: 1, lot: 1, entry: one.base }, one.base + 100, 0) // +100 pip = +100 token
   ok('保证金量级：1 手欧美 ≈ $1086', Math.abs(m - 1086) < 5, String(m))
   ok('盈亏量级：1 手欧美 100 pip ≈ $1000', Math.abs(p - 1000) < 1, String(p))
-  // 日元：1 手 = 10 万刀，涨 1.00（=100 pip）赚 10 万日元 ≈ $656（按平仓价折美元）
+  // TOKEN/JPY：1 手 = 10 亿 token（= $10 万），涨 100 pip（+0.0001 JPY/t）赚 ≈ $656
   const jpy = PAIRS[2]
-  const pj = pnlOf({ dir: 1, lot: 1, entry: jpy.base }, jpy.base + 1.00, 2)
-  ok('盈亏量级：1 手日元 +100 pip ≈ $656', Math.abs(pj - 100000 / 152.4) < 2, String(pj))
+  const pj = pnlOf({ dir: 1, lot: 1, entry: jpy.base }, jpy.base + 0.0001, 2)
+  ok('盈亏量级：1 手 TOKEN/JPY +100 pip ≈ $656', Math.abs(pj - 100000 / 152.4) < 2, String(pj))
+  ok('保证金量级：1 手 TOKEN/JPY 100x ≈ $1000', Math.abs(marginFor(1, jpy.base, 2, 100) - 1000) < 5, String(marginFor(1, jpy.base, 2, 100)))
   // 空单方向应为负
-  const s = pnlOf({ dir: -1, lot: 1, entry: one.base }, one.base + 0.0100, 0)
+  const s = pnlOf({ dir: -1, lot: 1, entry: one.base }, one.base + 100, 0)
   ok('方向：空单遇到上涨是亏', s < -900, String(s))
   // 鲸元/TOKEN：报价单位是 token（1 token = $0.0001 折算）。1 手 = 5 万枚，涨 100 token → 5M token = $500
   const whalePi = PAIRS.findIndex((p) => p.id === 'WHALE')
@@ -213,12 +215,12 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
   const gdef = freshState()
   ok('不传参数 = 默认计时赛 90s 100x / 1 万', gdef.left === 90000 && gdef.lev === 100 && gdef.mode === 'timed' && gdef.cash === 10000)
 
-  // 负债判负（归来模式）：30 手欧美 100x，价格从 1.086 砸到 0.98 → 亏 31.8 万 > 30 万本金 → 负债
+  // 负债判负（归来模式）：30 手欧美 100x，价格从 10860 t 砸到 9800 t → 亏 31.8 万 > 30 万本金 → 负债
   const gl = freshState({ pi: 0, lev: 100, dur: 90, mode: 'goal' })
   gl.running = true
-  gl.you.pos = { dir: 1, lot: 30, entry: 1.086, margin: marginFor(30, 1.086, 0, 100) }
+  gl.you.pos = { dir: 1, lot: 30, entry: 10860, margin: marginFor(30, 10860, 0, 100) }
   gl.you.locked = gl.you.pos.margin
-  gl.px = 0.98
+  gl.px = 9800
   const setSay = noop, sayAtRef = { current: 0 }, setRunning = noop
   step(gl, setSay, sayAtRef, setRunning)
   ok('归来模式：负债（权益 < 0）判负', gl.running === false && gl.you.dead === true && /负债/.test(gl.result),
@@ -247,12 +249,12 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
   ok('空中飞人：归来模式你负债 → 恰好 +1', ENGINE.flyer === flyBefore + 1, `${flyBefore} -> ${ENGINE.flyer}`)
 
   // 维持线（没归零也爆）：1 手欧美 100x 保证金 $1086，维持线 $163；
-  // 价格砸到 0.9869 → 亏 9910 → 权益 ≈ $90（>0 但 <163）→ 维持线爆仓
+  // 价格砸到 9869 t（-991 pip）→ 亏 9910 → 权益 ≈ $90（>0 但 <163）→ 维持线爆仓
   const gm = freshState({ pi: 0, lev: 100, dur: 500, mode: 'timed' })
   gm.running = true; gm.endAt = Date.now() + 500000
-  gm.you.pos = { dir: 1, lot: 1, entry: 1.086, margin: marginFor(1, 1.086, 0, 100) }
+  gm.you.pos = { dir: 1, lot: 1, entry: 10860, margin: marginFor(1, 10860, 0, 100) }
   gm.you.locked = gm.you.pos.margin
-  gm.px = 0.9869
+  gm.px = 9869
   const eqRaw = gm.you.balance + pnlOf(gm.you.pos, gm.px, 0)
   step(gm, setSay, sayAtRef, setRunning)
   ok('权益 < 保证金×15% → 维持线爆仓（没归零也算爆）', gm.running === false && gm.you.dead === true, `eq=${eqRaw.toFixed(0)} ${gm.result}`)

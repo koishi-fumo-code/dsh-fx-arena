@@ -9,8 +9,9 @@
 
 ## 玩什么
 
-- **五个品种**：EUR/USD、GBP/USD、USD/JPY、黄金，还有**鲸元/TOKEN**——鲸鲸自己的币对「token」
-  的行情（游戏内 1 token = $0.0001 折算记账，1 鲸元 ≈ 4200 token），波动是外汇的十几倍。
+- **五个品种**：EUR/TOKEN、GBP/TOKEN、TOKEN/JPY、黄金，还有**鲸元/TOKEN**——鲸鲸自己的币对「token」
+  的行情。游戏内统一按 1 token = $0.0001（$100/百万 token）折美元记账：1 欧元 ≈ 10860 token、
+  1 英镑 ≈ 12710 token、1 token ≈ 0.01514 日元、1 鲸元 ≈ 4200 token。
   彩蛋规则：**她永远做多、绝不做空自己的币（护盘喵）**；
   你做空她会当场破防，做多她会嘴硬地罩着你。一局结束后可切换。
 - **可选赛制**（开局前点选，局中锁定）：
@@ -66,7 +67,7 @@ macOS / Linux：`DSH_HOME=~/.dsh node scripts/install.mjs`。
 ## 验证（不重启也能跑）
 
 ```bash
-node fx-arena/scripts/selftest.mjs   # 215 条断言：包清单 / patch / bundle 加载 / 5品种×2模式×2杠杆整局冒烟 / 盈亏量级 / 强平线 / 负债出局 / 空中飞人 / 冲 2000 万 / 鲸元护盘 / 后台续跑与手动停止 / 隔离 DSH_HOME 的安装器集成测试
+node fx-arena/scripts/selftest.mjs   # 217 条断言：包清单 / patch / bundle 加载 / 5品种×2模式×2杠杆整局冒烟 / 盈亏量级 / 强平线 / 负债出局 / 空中飞人 / 冲 2000 万 / 鲸元护盘 / 后台续跑与手动停止 / 隔离 DSH_HOME 的安装器集成测试
 ```
 
 覆盖的都是启动级事故：声明了 `dsh.client` 必须有 `./client` 出口（缺了**整台 DSH 起不来**）、
