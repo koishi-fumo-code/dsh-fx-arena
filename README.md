@@ -34,13 +34,28 @@
 
 ## 装
 
+**换台电脑也不用改任何东西**：整个插件目录拷过去（或从市场装），跑安装器即可。
+安装器不认死路径、不认死 profile：
+
+- `DSH_HOME` 优先读环境变量，否则 `~/.dsh`；
+- 自动扫描 `<DSH_HOME>/profiles/*`，凡是有 `dsh.profile.bundles` 的 profile 全装；
+- 写 profile 前先备份 `package.json`，写完立刻读回校验，写坏自动还原；
+- 装完自检（bundle patch / `./client` 出口 / 链接 / 登记），不通过就报错退出。
+
+**Windows 一键**：双击 [install.cmd](install.cmd)。它会自动找 Node 22+（PATH 里的，或 DSH
+自带的 Electron 运行时），找不到会提示你先装 Node。命令行等价：
+
 ```bash
-node fx-arena/scripts/install.mjs            # 默认登记 desktop profile，--dry 可先看
+node fx-arena/scripts/install.mjs              # 自动检测并安装到所有 profile
+node fx-arena/scripts/install.mjs --dry        # 只预览改什么
+node fx-arena/scripts/install.mjs --verify-only  # 只自检
 ```
+
+macOS / Linux：`DSH_HOME=~/.dsh node scripts/install.mjs`。
 
 它只做两件事（抄 `dsh-feiyu-kb` 的规矩，保证卸载干净）：
 
-1. junction `dsh-fx-arena` 进 `<profile>/node_modules`；
+1. 建 `dsh-fx-arena` 链接进 `<profile>/node_modules`（Windows 用 junction）；
 2. profile 的 `package.json` 里加 `dependencies: link:` + `dsh.profile.bundles: [包名]`。
 
 入口（`insert`）在**包自带**的 `cordis.patch.yml` 里 —— 用户的 patch 一行都不写，
@@ -49,7 +64,7 @@ node fx-arena/scripts/install.mjs            # 默认登记 desktop profile，--
 ## 验证（不重启也能跑）
 
 ```bash
-node fx-arena/scripts/selftest.mjs   # 198 条断言：包清单 / patch / bundle 加载 / 5品种×2模式×2杠杆整局冒烟 / 盈亏量级 / 强平线 / 负债出局 / 冲 2000 万 / 鲸元护盘 / 后台续跑与手动停止
+node fx-arena/scripts/selftest.mjs   # 208 条断言：包清单 / patch / bundle 加载 / 5品种×2模式×2杠杆整局冒烟 / 盈亏量级 / 强平线 / 负债出局 / 冲 2000 万 / 鲸元护盘 / 后台续跑与手动停止 / 隔离 DSH_HOME 的安装器集成测试
 ```
 
 覆盖的都是启动级事故：声明了 `dsh.client` 必须有 `./client` 出口（缺了**整台 DSH 起不来**）、

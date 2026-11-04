@@ -24,14 +24,17 @@ const here = dirname(fileURLToPath(import.meta.url))
 const pluginDir = resolve(here, '..')
 const PKG = JSON.parse(readFileSync(join(pluginDir, 'package.json'), 'utf8')).name
 
+// 和 install.mjs 用同一套探测：DSH_HOME 由环境变量推，profile 自动枚举
+const { detectHome, listProfiles } = await import(new URL('./install.mjs', import.meta.url).href)
+const dshHome = detectHome()
+
 const argv = process.argv.slice(2)
 const yes = argv.includes('--yes')
 if (!yes) { console.log('这是会改 profile 的操作，加 --yes 确认：\n  node scripts/uninstall.mjs --yes'); process.exit(1) }
 const pIdx = argv.indexOf('--profiles')
-const profiles = (pIdx >= 0 ? String(argv[pIdx + 1] || '') : 'desktop')
-  .split(',').map((s) => s.trim()).filter(Boolean)
-
-const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')
+const profiles = pIdx >= 0
+  ? String(argv[pIdx + 1] || '').split(',').map((s) => s.trim()).filter(Boolean)
+  : listProfiles(dshHome).map((p) => p.name) // 不给就全卸，换机器也一致
 const posix = (p) => String(p).replace(/\\/g, '/')
 const log = (...a) => console.log(...a)
 

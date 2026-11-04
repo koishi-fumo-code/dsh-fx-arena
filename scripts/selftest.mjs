@@ -294,5 +294,41 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
   ENGINE.running = false; ENGINE.g = null
 }
 
+/* 安装器：换台电脑从零安装（隔离 DSH_HOME，绝不碰真 profile） */
+{
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join: pjoin } = await import('node:path')
+  const { pathToFileURL: p2u } = await import('node:url')
+
+  const home = mkdtempSync(pjoin(tmpdir(), 'fx-arena-home-'))
+  const prof = pjoin(home, 'profiles', 'desktop')
+  mkdirSync(prof, { recursive: true })
+  const pkgFile = pjoin(prof, 'package.json')
+  writeFileSync(pkgFile, JSON.stringify({ name: 'profile-under-test', dsh: { profile: { bundles: ['some-other-plugin'] } } }, null, 2))
+
+  const inst = await import(p2u(pjoin(PKG, 'scripts', 'install.mjs')).href)
+  ok('安装器：自动检测 DSH_HOME（不依赖本机路径）', inst.detectHome({ DSH_HOME: home }, '/nonexistent') === home)
+  const found = inst.listProfiles(home)
+  ok('安装器：自动枚举出有 bundles 的 profile', found.length === 1 && found[0].name === 'desktop', JSON.stringify(found.map((x) => x.name)))
+
+  const r = inst.installProfile({ dir: prof, log: () => {} })
+  ok('安装器：登记成功', r.ok === true, r.why)
+  const m = JSON.parse(readFileSync(pkgFile, 'utf8'))
+  ok('安装器：bundles 里加入了本插件', m.dsh.profile.bundles.includes('dsh-fx-arena'), JSON.stringify(m.dsh.profile.bundles))
+  ok('安装器：dependencies 写的是 link: 本包', String(m.dependencies['dsh-fx-arena']).startsWith('link:'), m.dependencies['dsh-fx-arena'])
+  ok('安装器：没往用户 cordis.patch.yml 写任何行', !existsSync(pjoin(prof, 'cordis.patch.yml')))
+  ok('安装器：写前留了 package.json 备份', existsSync(pkgFile + '.bak-fxarena'))
+  const v = inst.verifyProfile({ dir: prof })
+  ok('安装器：装完自检全过', v.every((x) => x.ok), JSON.stringify(v.filter((x) => !x.ok)))
+  const r2 = inst.installProfile({ dir: prof, log: () => {} })
+  ok('安装器：重复安装幂等（不再改动）', r2.ok === true && r2.changed.length === 0, JSON.stringify(r2.changed))
+  ok('安装器：包清单自检（bundle patch / client 出口）通过', inst.checkBundle().ok === true)
+
+  // Windows 上 junction 是重解析点，先单独拆掉再删目录（删不掉就留着，临时目录无害）
+  try { rmSync(pjoin(prof, 'node_modules', 'dsh-fx-arena'), { recursive: false, force: true }) } catch { /* 忽略 */ }
+  try { rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 }) } catch { /* 忽略 */ }
+}
+
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`)
 process.exit(fail ? 1 : 0)
