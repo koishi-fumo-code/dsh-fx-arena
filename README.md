@@ -33,6 +33,12 @@
 - **鲸鲸是真对手**：她跑一套算法（EMA 快慢线交叉 + 每局一个方向偏好 + 随机犹豫），
   和**你**看的是**同一条**价格流。她开仓、平仓、浮盈浮亏都会说话（傲娇台词，人设：
   蓝色大肥鱼「鲸鲸」——自称本小姐，叫玩家「狗修鲸」，句尾带喵）。
+- **鲸鲸出招开关**：面板「鲸鲸出招」可选 `本地算法`（默认，免费零联网）或
+  `DeepSeek API`（鲸鲸真的**在线**让 DeepSeek 决出招，**会消耗你的 API 账户余额**）。
+  选 API 模式时，key 读系统环境变量 `DEEPSEEK_API_KEY`（走 Electron 的 `process.env`）；
+  浏览器里读不到 env 时，可兜底把 key 写进 `localStorage` 的 `fx-arena-whale.key`。
+  没配 key 时即使切到 API 模式也只提示、不真正发请求（避免白烧钱或报错）。
+  API 模式每 ≥4 秒问一次（有并发锁 + 最小间隔），拿到 JSON 立即开/平仓 + 说话。
 - 战绩（胜/负/平/传说局 + 最大领先）记在浏览器 `localStorage`，不影响任何数据目录。
 
 ## 装
@@ -67,7 +73,7 @@ macOS / Linux：`DSH_HOME=~/.dsh node scripts/install.mjs`。
 ## 验证（不重启也能跑）
 
 ```bash
-node fx-arena/scripts/selftest.mjs   # 217 条断言：包清单 / patch / bundle 加载 / 5品种×2模式×2杠杆整局冒烟 / 盈亏量级 / 强平线 / 负债出局 / 空中飞人 / 冲 2000 万 / 鲸元护盘 / 后台续跑与手动停止 / 隔离 DSH_HOME 的安装器集成测试
+node fx-arena/scripts/selftest.mjs   # 221 条断言：包清单 / patch / bundle 加载 / 5品种×2模式×2杠杆整局冒烟 / 盈亏量级 / 强平线 / 负债出局 / 空中飞人 / 冲 2000 万 / 鲸元护盘 / API 模式决策落地 / 后台续跑与手动停止 / 隔离 DSH_HOME 的安装器集成测试
 ```
 
 覆盖的都是启动级事故：声明了 `dsh.client` 必须有 `./client` 出口（缺了**整台 DSH 起不来**）、
@@ -87,7 +93,7 @@ patch 必须是合法数组、host `apply()` 喂空 ctx 也不能抛、左侧图
 | 文件 | 责任 |
 |---|---|
 | `index.js` | host 半端：**故意空实现**（游戏全在浏览器里），只守「apply 绝不抛」 |
-| `client.js` | 全部游戏逻辑：引擎（GBM+消息冲击）、鲸鲸算法、Canvas K 线、React 面板、槽位注册 |
+| `client.js` | 全部游戏逻辑：引擎（GBM+消息冲击）、鲸鲸算法/DeepSeek API 出招、Canvas K 线、React 面板、槽位注册 |
 | `cordis.patch.yml` | 包自带挂载：`- insert: id: fx-arena / name: dsh-fx-arena` |
 | `scripts/install.mjs` / `uninstall.mjs` | 登记 / 兜底卸载（junction + bundles，不动用户 patch） |
 | `scripts/selftest.mjs` | 45 条断言（mock 浏览器加载 bundle + 引擎整局冒烟） |
@@ -99,6 +105,7 @@ patch 必须是合法数组、host `apply()` 喂空 ctx 也不能抛、左侧图
 ## 已知边界
 
 - 价格是自己演的随机游走，**别拿它练真盘手感**——真外汇有隔夜利息、滑点、新闻驱动。
-- 鲸鲸的"AI"是本地算法，不调模型（这样零依赖、零 API 成本、断网也能怼你）。
+- 鲸鲸的"AI"默认是本地算法（零依赖、零 API 成本、断网也能怼你）；只有你手动切到
+  `DeepSeek API` 她才会联网，那时会扣 API 余额——所以默认不烧钱喵。
 - 面板靠 DSH 的 `sidebar.panellist` + `main` 两个槽位；万一哪天宿主改了槽位名，
   client.js 会自动退回挂到「设置 → FX战士大肥鱼」，游戏本身照常能玩。

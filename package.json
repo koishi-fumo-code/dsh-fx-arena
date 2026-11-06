@@ -1,7 +1,7 @@
 {
   "name": "dsh-fx-arena",
-  "version": "0.10.0",
-  "description": "DSH 插件：FX战士大肥鱼 —— 和大肥鱼（鲸鲸）切磋：EUR/GBP/TOKEN 对 token、黄金、鲸元五个品种，杠杆 10~500x、计时赛 90~500s，或「重生之久留美归来」：30 万本金、不限时、先摸到 2000 万赢、负债即出局（空中飞人计数）；入口在左侧图标条；一键安装器（Windows 双击 install.cmd），换机即装即用",
+  "version": "0.11.0",
+  "description": "DSH 插件：FX战士大肥鱼 —— 和大肥鱼（鲸鲸）切磋：EUR/GBP/TOKEN 对 token、黄金、鲸元五个品种，杠杆 10~500x、计时赛 90~500s，或「重生之久留美归来」：30 万本金、不限时、先摸到 2000 万赢、负债即出局（空中飞人计数）；鲸鲸出招可选本地免费算法或 DeepSeek API（会消耗 API 余额）；入口在左侧图标条；一键安装器（Windows 双击 install.cmd），换机即装即用",
   "type": "module",
   "main": "index.js",
   "exports": {

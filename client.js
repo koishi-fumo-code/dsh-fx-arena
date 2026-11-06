@@ -34,6 +34,12 @@ window.__ModuleLoader__.load({
     const MAINT = 0.15               // 强平线：权益 < 占用保证金 × 15% 就爆
     const SPREAD = 1.0               // 点差（pip，双向成本）
     const TOKEN_USD = 0.0001         // 游戏内汇率：1 token = $0.0001（$100/百万 token），所有 TOKEN 对折美元记账都按这个喵
+    // ── 鲸鲸出招模式：本地算法 / 调 DeepSeek 决 ──
+    const WHALE_MODES = { LOCAL: 'local', API: 'api' }
+    const API_DEFAULT_BASE = 'https://api.deepseek.com/v1'
+    const API_DEFAULT_MODEL = 'deepseek-chat'
+    const API_MIN_GAP_MS = 4000   // API 模式下两次请求至少间隔多久，别把 LLM 当行情引擎打爆喵
+    const WHALE_KEY = 'fx-arena-whale'  // 本机配置键：{ mode?, baseUrl?, model?, key? }只存开关和兜底 key，不进插件包
     const PAIRS = [
       // 1 EUR = 10860 token（= $1.086）。1 手 = 10 万枚；1 pip = 1 token。
       { id: 'EURTKN', label: 'EUR/TOKEN', base: 10860, vol: 0.7, dp: 0, pip: 1, sfx: ' t',
@@ -229,6 +235,41 @@ window.__ModuleLoader__.load({
       flyerMem = n
       try { localStorage.setItem(FLYER_KEY, String(n)) } catch { /* 忽略 */ }
       return n
+    }
+
+    /* ── 鲸鲸出招本机配置（localStorage）：mode / baseUrl / key / model ──
+     * key 只写这份 localStorage，不进 git、不进插件包；换机各自配喵。 */
+    const readWhaleCfg = () => {
+      try {
+        const raw = localStorage.getItem(WHALE_KEY)
+        if (!raw) return {}
+        const o = JSON.parse(raw)
+        if (!o || typeof o !== 'object') return {}
+        return o
+      } catch { return {} }
+    }
+    const writeWhaleCfg = (o) => {
+      try { localStorage.setItem(WHALE_KEY, JSON.stringify(o)) } catch { /* 忽略 */ }
+      return o
+    }
+    /** 读 DeepSeek key：优先系统环境变量 DEEPSEEK_API_KEY，其次本机 localStorage 兜底（换机各自配喵） */
+    const readApiKey = () => {
+      try {
+        const env = (typeof process !== 'undefined' && process.env) || (typeof globalThis !== 'undefined' && globalThis.DEEPSEEK_API_KEY ? { DEEPSEEK_API_KEY: globalThis.DEEPSEEK_API_KEY } : null)
+        if (env && env.DEEPSEEK_API_KEY) return String(env.DEEPSEEK_API_KEY).trim()
+      } catch { /* 无法读 env 就跳过 */ }
+      try { return String(localStorage.getItem(WHALE_KEY + '.key') || '').trim() } catch { return '' }
+    }
+    /** 拿到当前生效的 whale 配置；模式默认本地，key 走环境变量 + 本机兜底 */
+    const whaleCfg = (raw = readWhaleCfg()) => ({
+      mode: raw.mode === WHALE_MODES.API ? WHALE_MODES.API : WHALE_MODES.LOCAL,
+      baseUrl: (raw.baseUrl || API_DEFAULT_BASE).replace(/\/+$/, ''),
+      model: raw.model || API_DEFAULT_MODEL,
+      key: readApiKey(),
+    })
+    const apiConfigured = () => {
+      const c = whaleCfg()
+      return c.mode === WHALE_MODES.API && c.key.length > 0
     }
 
     /* ─────────────────── 后台对局引擎（模块级单例） ───────────────────
@@ -454,7 +495,19 @@ window.__ModuleLoader__.load({
               h('span', { 'data-fxa-goalnum': '' }, fmtShort(you.equity))),
             h('span', { 'data-fxa-goaltarget': '' }, `→ ${fmtShort(GOAL)}`)) : null),
 
-        // ── 品种 ──
+        // ── 鲸鲸出招：本地算法（免费）/ DeepSeek API（会消耗 API 余额）──
+        h('div', { 'data-fxa-row': '' },
+          h('span', { 'data-fxa-tag': '' }, '鲸鲸出招'),
+          h('button', { 'data-fxa-chip': '', 'data-on': whaleCfg().mode === WHALE_MODES.LOCAL ? '' : undefined,
+            onClick: () => { const c = readWhaleCfg(); writeWhaleCfg({ ...c, mode: WHALE_MODES.LOCAL }); ENGINE.setSay('本地算法本小姐就够了喵，免费不联网。'); } }, '本地算法'),
+          h('button', { 'data-fxa-chip': '', 'data-on': whaleCfg().mode === WHALE_MODES.API ? '' : undefined,
+            onClick: () => { const c = readWhaleCfg(); writeWhaleCfg({ ...c, mode: WHALE_MODES.API }); ENGINE.setSay(apiConfigured() ? '切到 DeepSeek 了喵，本小姐要烧你余额出招咯～' : '切到 DeepSeek 了，但没配 DEEPSEEK_API_KEY，先给你提示喵。'); } }, 'DeepSeek API 🔔'),
+          h('span', { 'data-fxa-note': '' },
+            whaleCfg().mode === WHALE_MODES.API
+              ? (apiConfigured() ? '已接 DeepSeek，每 4 秒问一次出招喵（会消耗 API 余额）' : '需配置 DEEPSEEK_API_KEY 环境变量才生效喵')
+              : '本地快慢 EMA + 每局性格，零联网、不烧余额喵')),
+        whaleCfg().mode === WHALE_MODES.API && !apiConfigured() ? h('div', { 'data-fxa-note': '', style: { color: 'var(--fxa-dn)' } },
+          '提示：把 DeepSeek 的 API key 设进系统环境变量 DEEPSEEK_API_KEY，或在这里填本机兜底 key。') : null,
         h('div', { 'data-fxa-pairs': '' }, PAIRS.map((p, i) =>
           h('button', {
             key: p.id, 'data-fxa-pair': '', 'data-on': i === cfg.pi ? '' : undefined,
@@ -536,6 +589,8 @@ window.__ModuleLoader__.load({
         last: px, lastActionAt: Date.now(), lastNudgeAt: 0,
         you: freshAccount(cash), whale: freshAccount(cash),
         whaleNextThink: 12,
+        whaleApiLive: false, whaleApiAt: 0, whaleApiNext: null,
+        whaleApiLine: '', whaleApiLineAt: 0, whaleApiErr: '', whaleApiErrAt: 0,
         // 每局一个脾气；但炒她自己的币（鲸元）时，本小姐永远做多喵
         whaleBias: (PAIRS[c.pi].id === 'WHALE') ? 1 : (r() > 0.45 ? 1 : -1),
         running: false, endAt: 0,
@@ -601,7 +656,99 @@ window.__ModuleLoader__.load({
       setSay(line)
     }
 
-    /** 大肥鱼：快慢 EMA 交叉 + 每局一个方向偏好 + 30% 犹豫不跟单 */
+    /* ─────────────────── API 模式：让 DeepSeek 替鲸鲸出招 ───────────────────
+     * 把市场快照（现价/快慢 EMA/双方权益与持仓/剩余时间/本金）用 JSON 发给
+     * /v1/chat/completions，要它返回一个决策：flat / 开仓{dir,lot}，并给句台词。
+     * 异步发起，不阻塞 tick；用 g.whaleApiLive 并发锁 + 最小间隔防打爆喵。 */
+    function buildApiPayload(g) {
+      const pr = PAIRS[g.pi]
+      const closes = g.candles.slice(-40).map((c) => c.c)
+      const ema = (n) => { const k = 2 / (n + 1); let e = closes[0]; for (const c of closes) e = c * k + e * (1 - k); return e }
+      const fast = ema(9), slow = ema(26)
+      const { bid, ask } = quote(g, g.pi)
+      const you = g.you, whale = g.whale
+      const lev = g.lev
+      const lotCap = g.mode === 'goal' ? 50 : 10
+      const system = [
+        '你正在扮演大肥鱼「鲸鲸」，一个傲娇、嘴硬心软的蓝鲸交易员，自称「本小姐」，句尾常带「喵」。',
+        `当前对局：${pr.label}，杠杆 ${lev}x${g.mode === 'goal' ? '，重生之久留美归来（不限时，先到 2000 万赢，负债即出局）' : `，计时 ${g.dur}s`}。`,
+        '开盘现金 $' + Number(g.cash).toFixed(0) + '。保证金 = 名义本金 / 杠杆；1 手保证金约 $'
+          + Math.max(1, Math.round(marginFor(1, pr.base, g.pi, lev)))
+          + '。你的方向偏好由行情和动能自己判断，可以多空，别只会一根筋。',
+        '请只输出一个 JSON 对象（不要代码块、不要解释），两选其一：',
+        '  开/平仓：{"action":"trade","dir":1|-1,"lot":<0.1~' + lotCap + '步进0.1>,"line":"<一句傲娇台词，含喵>"}',
+        '  观望：  {"action":"flat","line":"<一句傲娇台词，含喵>"}',
+        '手数别超 ' + lotCap + '，别把自己杠杆开到爆仓；每次只给一个动作。',
+      ].join('\n')
+      const user = [
+        `品种 ${pr.label} 现价 ${fmtPx(priceOf(g), pr)}（bid ${fmtPx(bid, pr)} / ask ${fmtPx(ask, pr)}）。`,
+        `快 EMA(9) ${fmtPx(fast, pr)}，慢 EMA(26) ${fmtPx(slow, pr)} → ${fast > slow ? '偏多动能' : '偏空动能'}。`,
+        '你：现金 $' + Number(whale.balance).toFixed(0) + '，占用 $' + Number(whale.locked).toFixed(0) + '，权益 $' + Number(whale.equity).toFixed(0)
+          + (whale.pos ? `，当前持仓 ${whale.pos.dir > 0 ? '多' : '空'} ${whale.pos.lot} 手 @ ${fmtPx(whale.pos.entry, pr)}` : '，当前空仓') + '。',
+        '对手：权益 $' + Number(you.equity).toFixed(0) + (you.pos ? `，持仓 ${you.pos.dir > 0 ? '多' : '空'} ${you.pos.lot} 手` : '，空仓') + '。',
+        g.mode === 'goal'
+          ? `目标 ${fmtShort(GOAL)}，你已到 ${fmtShort(whale.equity)}，对手 ${fmtShort(you.equity)}。`
+          : `剩余 ${fmtClock(g.left)}。`,
+        '给你一个动作喵。',
+      ].join('\n')
+      return { model: whaleCfg().model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }
+    }
+    /** 发起一次 DeepSeek 决策（异步），拿到 JSON 后**立即**开/平仓 + 说台词，不拖到下一拍喵 */
+    async function whaleApiThink(g, setSay, sayAtRef) {
+      const cfg = whaleCfg()
+      const ctl = { post: buildApiPayload(g) }
+      try {
+        const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.key}` },
+          body: JSON.stringify({ ...ctl.post, temperature: 0.9, max_tokens: 220, response_format: { type: 'json_object' } }),
+        })
+        if (!res.ok) throw new Error('HTTP ' + res.status)
+        const data = await res.json()
+        const txt = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || ''
+        const m = txt.match(/\{[\s\S]*\}/)
+        const dec = m ? JSON.parse(m[0]) : null
+        if (!dec) throw new Error('空回复')
+        if (dec.line) speak(dec.line, setSay, sayAtRef)
+        if (dec.action === 'trade' && (dec.dir === 1 || dec.dir === -1)) {
+          whaleApplyApiTrade(g, Math.round(Math.min(capLot(g), Math.max(0.1, Number(dec.lot) || 0.1)) * 10) / 10, dec.dir > 0)
+        }
+      } catch (e) {
+        g.whaleApiErr = String((e && e.message) || e); g.whaleApiErrAt = Date.now()
+        speak(pick(['……嗯？本小姐的网络卡了喵，先按盘感来。', 'API 半路掉线？哼，本小姐照样能打喵。']), setSay, sayAtRef)
+      } finally {
+        g.whaleApiLive = false
+        g.whaleApiAt = Date.now()
+      }
+    }
+
+    /** 当前局鲸鲸可开最大手数（归来模式 50，否则 10） */
+    function capLot(g) { return g.mode === 'goal' ? 50 : 10 }
+    /** API 决策开/平：与本地 whaleThink 落在同一套持仓/保证金模型上喵 */
+    function whaleApplyApiTrade(g, lot, long) {
+      const a = g.whale
+      const dir = long ? 1 : -1
+      const { bid, ask } = quote(g, g.pi)
+      if (a.pos && a.pos.dir !== dir) { // 反向 → 先平（盈亏当场结算）
+        const exit = a.pos.dir > 0 ? bid : ask
+        const pnl = pnlOf(a.pos, exit, g.pi)
+        a.balance += pnl; a.locked = Math.max(0, a.locked - (a.pos.margin || 0)); a.pos = null
+        g.log.unshift({ t: Date.now(), dir: pnl >= 0 ? 1 : -1, txt: `大肥鱼平仓 ${fmtMoney(pnl)}`, you: false })
+        return
+      }
+      if (a.pos && a.pos.dir === dir) return // 同向已持，不重复开喵
+      const entry = dir > 0 ? ask : bid
+      const per = marginFor(1, entry, g.pi, g.lev)
+      const free = Math.max(0, a.equity - a.locked)
+      if (!(per > 0) || free < per * 0.1) return // 鱼也穷到开不起 0.1 手喵
+      const lot2 = Math.max(0.1, Math.round(Math.min(capLot(g), lot) * 10) / 10)
+      const margin = marginFor(lot2, entry, g.pi, g.lev)
+      a.pos = { dir, lot: lot2, entry, margin }
+      a.locked += margin
+      g.log.unshift({ t: Date.now(), dir, txt: `大肥鱼${dir > 0 ? '做多' : '做空'} ${lot2} 手`, you: false })
+    }
+
+    /** 本地算法版鲸鲸：快慢 EMA 交叉 + 每局一个方向偏好 + 30% 犹豫不跟单 */
     function whaleThink(g, setSay, sayAtRef) {
       const closes = g.candles.slice(-40).map((c) => c.c)
       if (closes.length < 25) return
@@ -656,7 +803,12 @@ window.__ModuleLoader__.load({
       settle(g.you, g, g.pi); settle(g.whale, g, g.pi)
 
       if (g.tick >= g.whaleNextThink) {
-        whaleThink(g, setSay, sayAtRef)
+        const useApi = apiConfigured()
+        // API 模式节奏：不在飞请求 + 距上次请求 ≥ 最小间隔，才发喵（异步落地在 whaleApiThink 内）
+        const gapOk = !g.whaleApiLive && Date.now() - (g.whaleApiAt || 0) >= API_MIN_GAP_MS
+        if (useApi) {
+          if (gapOk) { g.whaleApiLive = true; whaleApiThink(g, setSay, sayAtRef) }
+        } else whaleThink(g, setSay, sayAtRef)
         g.whaleNextThink = g.tick + 6 + Math.floor(g.r() * 10)
       }
       // 大肥鱼赢/亏的实时嘴炮
@@ -836,7 +988,7 @@ window.__ModuleLoader__.load({
     /* ───────────────────────── 挂载 ───────────────────────── */
     // 调试钩子：scripts/selftest.mjs 在 Node 里 mock 掉 window/document/react 后，
     // 直接驱动引擎跑 90 秒行情做数值冒烟（浏览器里挂个只读对象，无副作用）。
-    try { if (typeof window !== 'undefined') window.__fxArenaEngine = { freshState, step, quote, pnlOf, marginFor, drift, liquidated, PAIRS, GOAL, LEVS, DURS, roundMs, ENGINE, TICK_MS } } catch { /* 忽略 */ }
+    try { if (typeof window !== 'undefined') window.__fxArenaEngine = { freshState, step, quote, pnlOf, marginFor, drift, liquidated, PAIRS, GOAL, LEVS, DURS, roundMs, ENGINE, TICK_MS, apiConfigured, whaleCfg, writeWhaleCfg } } catch { /* 忽略 */ }
 
     return {
       inject: ['slots'],

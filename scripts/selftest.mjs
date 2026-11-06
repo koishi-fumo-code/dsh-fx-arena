@@ -70,7 +70,8 @@ const reactMock = {
   useRef: (v) => ({ current: v }),
   useCallback: (f) => f,
 }
-globalThis.localStorage = { getItem: () => null, setItem: noop }
+const _lsd = {}
+globalThis.localStorage = { getItem: (k) => (k in _lsd ? _lsd[k] : null), setItem: (k, v) => { _lsd[k] = String(v) } }
 const mockDocument = {
   createElement: () => ({ setAttribute: noop, style: {}, textContent: '', remove: noop }),
   head: { appendChild: noop },
@@ -157,6 +158,41 @@ for (const mode of ['timed', 'goal']) for (const lev of [10, 500]) for (let pi =
   ok(`${tag}：大肥鱼真的下场交易了`, whaleTrades > 0 || !!g.whale.pos, `鱼单 ${whaleTrades} 笔`)
   ok(`${tag}：结算后双方都空仓`, !g.you.pos && !g.whale.pos)
 }
+
+/* ─────────── ⑤ API 模式冒烟：调 DeepSeek 决出招 ─────────── */
+console.log('⑤ DeepSeek API 模式（mock fetch）')
+globalThis.fetch = async () => ({
+  ok: true,
+  json: async () => ({ choices: [{ message: { content: '{"action":"trade","dir":1,"lot":1.5,"line":"这波本小姐看多喵！"}' } }] }),
+})
+// 往 localStorage 塞一份 API 配置，让 apiConfigured() 为真，逼出 API 路径
+//（模式走 fx-arena-whale.mode，兜底 key 走 fx-arena-whale.key）
+globalThis.localStorage.setItem('fx-arena-whale', JSON.stringify({ mode: 'api' }))
+globalThis.localStorage.setItem('fx-arena-whale.key', 'sk-test')
+{
+  const { freshState, step, apiConfigured, whaleCfg } = E
+  ok('apiConfigured() 读配置为 true', apiConfigured() === true)
+  const cfg0 = whaleCfg()
+  ok('whaleCfg 默认回退正确', cfg0.baseUrl === 'https://api.deepseek.com/v1' && cfg0.model === 'deepseek-chat' && cfg0.key === 'sk-test')
+  const g = freshState({ pi: 0, lot: 1, lev: 100, dur: 90, mode: 'timed' })
+  g.whaleApiLive = false; g.whaleApiAt = 0
+  g.running = true
+  g.endAt = Date.now() + 90 * 1000
+  const setSay0 = noop, sayRef0 = { current: 0 }, setRun0 = noop
+  // 步进到 whaleNextThink 触发 API 请求（异步 mock fetch），然后让微任务排空
+  for (let t = 0; t < 20 && g.running; t++) step(g, setSay0, sayRef0, setRun0)
+  await new Promise((r) => setImmediate(r))
+  for (let t = 0; t < 20 && g.running; t++) step(g, setSay0, sayRef0, setRun0)
+  await new Promise((r) => setImmediate(r))
+  const anyApiOpen = g.log.some((l) => !l.you) // 大肥鱼应该开过仓（mock 返回做多 1.5 手）
+  ok('API 决策被落地兑现（大肥鱼开仓）', anyApiOpen, g.log.filter((l) => !l.you).map((l) => l.txt).join(' / '))
+  // 验证上一步没把 whaleApiLive 留在 true（并发锁复位）
+  ok('API 并发锁复位（whaleApiLive=false）', g.whaleApiLive === false)
+}
+// 恢复 local 模式，别让后续「护盘」等本地逻辑测试误走 API 路径
+globalThis.localStorage.setItem('fx-arena-whale', JSON.stringify({ mode: 'local' }))
+// 清理，别污染后续 mock 的 fetch（bundle 里 selftest 是最后一个测试块）
+globalThis.fetch = undefined
 
 /* 数值抽查：量级对不对（TOKEN 对按 1 token=$0.0001 折美元，和旧 USD 对同量级） */
 {
